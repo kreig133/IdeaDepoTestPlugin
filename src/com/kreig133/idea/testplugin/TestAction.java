@@ -34,6 +34,8 @@ import com.intellij.testIntegration.TestIntegrationUtils;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Collection;
 
 /**
@@ -87,14 +89,33 @@ public class TestAction extends AnAction {
         final PackageWrapper targetPackage =
                 new PackageWrapper( PsiManager.getInstance( project ), data.getPackageName() );
 
-        final VirtualFile directoryForTestGenerating = getJavaTestDirectory();
+        final VirtualFile directoryForTestResourceGenerating = getJavaTestDirectory( false );
+        final PsiClass publicClassFromFile = getPublicClassFromFile( data.getClasses() );
+        final String beanConfig = TestBeanConfigCreator.getBeanConfig( publicClassFromFile );
+        final PsiDirectory testPackageDirectory =
+                createTestPackageDirectory( targetPackage, directoryForTestResourceGenerating );
+        final PsiFile file = testPackageDirectory.createFile( getConfigFileName( publicClassFromFile ) );
+
+        OutputStream outputStream = null;
+        try {
+            outputStream = file.getVirtualFile().getOutputStream( this );
+            outputStream.write( beanConfig.getBytes() );
+        } catch ( IOException e ) {
+            throw new RuntimeException( "Не удалось записать в файл спринговый конфиг" );
+        } finally {
+            try {
+                outputStream.close();
+            } catch ( IOException e ) { }
+        }
+
+        final VirtualFile directoryForTestGenerating = getJavaTestDirectory( true );
 
         if ( directoryForTestGenerating == null ) return null;
 
         final PsiDirectory resultObject = createTestPackageDirectory( targetPackage, directoryForTestGenerating );
 
         PsiClass targetClass = JavaDirectoryService.getInstance().createClass(
-                resultObject, getPublicClassFromFile( data.getClasses() ).getName() + "Test"
+                resultObject, publicClassFromFile.getName() + "Test"
         );
 
         addSuperClass( targetClass );
@@ -109,15 +130,24 @@ public class TestAction extends AnAction {
                 targetClass,
                 getJUnit4TestFramework(),
                 TestIntegrationUtils.extractClassMethods(
-                        getPublicClassFromFile( data.getClasses() ), true
+                        publicClassFromFile, true
                 )
         );
 
         addDaoField( data, targetClass );
 
+        targetClass.getModifierList().addAnnotation(
+                "org.junit.runner.RunWith( org.springframework.test.context.junit4.SpringJUnit4ClassRunner.class )" );
+        targetClass.getModifierList().addAnnotation( String.format(
+                "org.springframework.test.context.ContextConfiguration( locations = \"%s\" )",getConfigFileName( publicClassFromFile ) ) );
+
         JavaCodeStyleManager.getInstance( project ).shortenClassReferences( targetClass );
 
         return targetClass;
+    }
+
+    private String getConfigFileName( PsiClass publicClassFromFile ) {
+        return publicClassFromFile.getName() + "TestConfig.xml";
     }
 
     private void addDaoField( PsiJavaFile data, PsiClass targetClass ) {
@@ -161,21 +191,24 @@ public class TestAction extends AnAction {
         }.execute().getResultObject();
     }
 
-    private VirtualFile getJavaTestDirectory() {
-        VirtualFile selectedRoot = null;
+    private VirtualFile getJavaTestDirectory( boolean source ) {
         VirtualFile[] roots = ModuleRootManager.getInstance( myTargetModule ).getSourceRoots();
 
         if ( roots.length == 1 ) {
-            selectedRoot = roots[ 0 ];
+            return roots[ 0 ];
         } else {
             for ( VirtualFile root : roots ) {
-                if ( root.getPath().contains( "java" ) && root.getPath().contains( "test" ) ) {
-                    selectedRoot = root;
-                    break;
+                if ( root.getPath().contains( "test" ) ) {
+                    if( root.getPath().contains( "java" ) && source ){
+                        return root;
+                    }
+                    if( root.getPath().contains( "resources" ) && ! source ){
+                        return root;
+                    }
                 }
             }
         }
-        return selectedRoot;
+        throw new RuntimeException( "Не нашлось папки для созданий тестовых файлов" );
     }
 
     private void addTestMethods(
