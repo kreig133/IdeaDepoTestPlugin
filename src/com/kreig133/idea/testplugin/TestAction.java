@@ -4,7 +4,6 @@ import com.intellij.codeInsight.CodeInsightBundle;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.codeInsight.TargetElementUtil;
 import com.intellij.codeInsight.generation.GenerateMembersUtil;
-import com.intellij.ide.util.PackageUtil;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
@@ -16,9 +15,7 @@ import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -34,8 +31,6 @@ import com.intellij.testIntegration.TestIntegrationUtils;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Collection;
 
 /**
@@ -89,24 +84,7 @@ public class TestAction extends AnAction {
         final PackageWrapper targetPackage =
                 new PackageWrapper( PsiManager.getInstance( project ), data.getPackageName() );
 
-        final VirtualFile directoryForTestResourceGenerating = getJavaTestDirectory( false );
         final PsiClass publicClassFromFile = getPublicClassFromFile( data.getClasses() );
-        final String beanConfig = TestBeanConfigCreator.getBeanConfig( publicClassFromFile );
-        final PsiDirectory testPackageDirectory =
-                createTestPackageDirectory( targetPackage, directoryForTestResourceGenerating );
-        final PsiFile file = testPackageDirectory.createFile( getConfigFileName( publicClassFromFile ) );
-
-        OutputStream outputStream = null;
-        try {
-            outputStream = file.getVirtualFile().getOutputStream( this );
-            outputStream.write( beanConfig.getBytes() );
-        } catch ( IOException e ) {
-            throw new RuntimeException( "Не удалось записать в файл спринговый конфиг" );
-        } finally {
-            try {
-                outputStream.close();
-            } catch ( IOException e ) { }
-        }
 
         final VirtualFile directoryForTestGenerating = getJavaTestDirectory( true );
 
@@ -123,8 +101,6 @@ public class TestAction extends AnAction {
         Editor editor = CodeInsightUtil.positionCursor( project, targetClass.getContainingFile(),
                 targetClass.getLBrace() );
 
-
-
         addTestMethods(
                 editor,
                 targetClass,
@@ -136,18 +112,9 @@ public class TestAction extends AnAction {
 
         addDaoField( data, targetClass );
 
-        targetClass.getModifierList().addAnnotation(
-                "org.junit.runner.RunWith( org.springframework.test.context.junit4.SpringJUnit4ClassRunner.class )" );
-        targetClass.getModifierList().addAnnotation( String.format(
-                "org.springframework.test.context.ContextConfiguration( locations = \"%s\" )",getConfigFileName( publicClassFromFile ) ) );
-
         JavaCodeStyleManager.getInstance( project ).shortenClassReferences( targetClass );
 
         return targetClass;
-    }
-
-    private String getConfigFileName( PsiClass publicClassFromFile ) {
-        return publicClassFromFile.getName() + "TestConfig.xml";
     }
 
     private void addDaoField( PsiJavaFile data, PsiClass targetClass ) {
@@ -249,12 +216,12 @@ public class TestAction extends AnAction {
     }
 
     private void generateTestMethodBody( MemberInfo memberInfo, PsiCodeBlock body ) {
-        
+
         String map;
 
         final PsiParameter[] methodParameters =
                 ( ( PsiMethod ) memberInfo.getMember() ).getParameterList().getParameters();
-        
+
         if ( methodParameters.length > 0 ) {
 
             map = "values";
@@ -300,25 +267,12 @@ public class TestAction extends AnAction {
     private void addSuperClass( PsiClass targetClass ) throws IncorrectOperationException {
         PsiElementFactory ef = JavaPsiFacade.getInstance( project ).getElementFactory();
 
-        PsiClass superClass = findClass( project, "com.aplana.sbrf.deposit.AbstractDepoDaoExecuteTester" );
+        PsiClass superClass = findClass( project, "com.aplana.sbrf.deposit.AbstractDepoDaoExecuteTest" );
 
         assert superClass != null;
 
         PsiJavaCodeReferenceElement superClassRef = ef.createClassReferenceElement( superClass );
         targetClass.getExtendsList().add( superClassRef );
-    }
-
-    @Nullable
-    private PsiDirectory chooseDefaultDirectory( String packageName ) {
-        for ( ContentEntry e : ModuleRootManager.getInstance( myTargetModule ).getContentEntries() ) {
-            for ( SourceFolder f : e.getSourceFolders() ) {
-                final VirtualFile file = f.getFile();
-                if ( file != null && f.isTestSource() ) {
-                    return PsiManager.getInstance( project ).findDirectory( file );
-                }
-            }
-        }
-        return PackageUtil.findPossiblePackageDirectoryInModule( myTargetModule, packageName );
     }
 
     @Nullable
