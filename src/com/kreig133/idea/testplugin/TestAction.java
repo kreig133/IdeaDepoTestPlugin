@@ -31,7 +31,9 @@ import com.intellij.testIntegration.TestIntegrationUtils;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 /**
  * @author kreig133
@@ -184,16 +186,39 @@ public class TestAction extends AnAction {
             TestFramework descriptor,
             Collection<MemberInfo> methods
     ) throws IncorrectOperationException {
-
+        List<String> names = new ArrayList<String>();
         for ( MemberInfo m : methods ) {
-            generateMethod(
+            names.add( generateMethod(
                     TestIntegrationUtils.MethodKind.TEST,
                     descriptor, targetClass, editor, m
-            );
+            ) );
+        }
+        //TODO жутиий костыли, но ни времени ни желания разбираться нет
+        for ( String name : names ) {
+            PsiMethod method = null;
+            final PsiMethod[] psiMethods = targetClass.getMethods();
+            for ( PsiMethod psiMethod : psiMethods ) {
+                if ( psiMethod.getName().equalsIgnoreCase( "test" + name ) ) {
+                    method = psiMethod;
+                }
+            }
+            MemberInfo m = null;
+            for ( MemberInfo memberInfo : methods ) {
+                if ( memberInfo.getDisplayName().contains( name ) ) {
+                    m = memberInfo;
+                }
+            }
+            generateTestMethodBody( m, method.getBody() );
+        }
+        //TODO еще один костыль
+        for ( PsiMethod psiMethod : targetClass.getMethods() ) {
+            if( psiMethod.getName().contains( "dummy" )){
+                targetClass.deleteChildRange( psiMethod, psiMethod );
+            }
         }
     }
 
-    private void generateMethod(
+    private String generateMethod(
             TestIntegrationUtils.MethodKind methodKind,
             TestFramework descriptor,
             PsiClass targetClass,
@@ -206,13 +231,7 @@ public class TestAction extends AnAction {
         PsiDocumentManager.getInstance( targetClass.getProject() ).doPostponedOperationsAndUnblockDocument(
                 editor.getDocument() );
         TestIntegrationUtils.runTestMethodTemplate( methodKind, descriptor, editor, targetClass, method, name, true );
-        final PsiMethod[] psiMethods = targetClass.getMethods();
-        for ( PsiMethod psiMethod : psiMethods ) {
-            if ( psiMethod.getName().equalsIgnoreCase( "test" + name ) ) {
-                method = psiMethod;
-            }
-        }
-        generateTestMethodBody( m, method.getBody() );
+        return name;
     }
 
     private void generateTestMethodBody( MemberInfo memberInfo, PsiCodeBlock body ) {
@@ -255,7 +274,7 @@ public class TestAction extends AnAction {
     private void insertStatementFromTextToBody( PsiCodeBlock body, String statementText ) {
         body.add(
                 JavaPsiFacade.getInstance( project ).getElementFactory().createStatementFromText(
-                        statementText , body.getRBrace()
+                        statementText, body.getRBrace()
                 )
         );
     }
